@@ -239,7 +239,8 @@ app.get('/', (req, res) => {
   res.status(200).send('ok');
 });
 
-const PORT = process.env.PORT || 3000;
+// Для AMVERA и продакшена используем порт 80, иначе 3000
+const PORT = process.env.NODE_ENV === 'production' ? 80 : (process.env.PORT || 3000);
 app.listen(PORT, () => {
   console.log('Express server for VK Callback API запущен на порту', PORT);
   // Запускаем периодический пинг, чтобы контейнер Glitch не засыпал
