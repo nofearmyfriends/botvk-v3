@@ -1,27 +1,5 @@
 meta:
   environment: node
-  toolchain:
-    name: npm
-    version: 18
-
-build:
-  beforeBuildCommand: |
-    npm ci
-    mkdir -p tmp
-    mkdir -p logs
 
 run:
-  file: index.js
-  persistenceMount: /data
-  envVariables:
-    NODE_ENV: production
-    DB_PATH: /data/database.sqlite
-    PORT: 80
-  
-# Переменные окружения (настроить в панели AMVERA):
-# TELEGRAM_BOT_TOKEN=ваш_токен_telegram
-# VK_TOKEN=ваш_токен_vk  
-# VK_GROUP_ID=id_группы_vk
-# TG_CHAT_ID=id_чата_telegram
-# ADMIN_TG_ID=ваш_admin_id
-# TELEGRAM_GROUP_LINK=https://t.me/ваша_группа 
+  file: index.js 
