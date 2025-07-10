@@ -1,0 +1,27 @@
+{
+  "name": "botvk",
+  "version": "1.0.0",
+  "description": "VK и Telegram боты для проверки подписок",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "nodemon index.js"
+  },
+  "dependencies": {
+    "axios": "^1.10.0",
+    "body-parser": "^1.20.2",
+    "dotenv": "^16.5.0",
+    "exceljs": "^4.4.0",
+    "express": "^4.18.2",
+    "node-cron": "^4.1.0",
+    "sqlite3": "^5.1.7",
+    "telegraf": "^4.16.3",
+    "vk-io": "^4.9.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  },
+  "engines": {
+    "node": "16.x"
+  }
+}
