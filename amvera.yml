@@ -1,5 +1,18 @@
 meta:
   environment: node
+  toolchain:
+    name: npm
+    version: 18
+
+build:
+  beforeBuildCommand: |
+    npm ci
+    mkdir -p tmp logs backups
 
 run:
-  file: index.js 
+  file: index.js
+  persistenceMount: /data
+  envVariables:
+    NODE_ENV: production
+    DB_PATH: /data/database.sqlite
+    PORT: 80 
