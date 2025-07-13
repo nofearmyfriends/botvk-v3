@@ -227,29 +227,23 @@ app.post('/', (req, res) => {
     console.log('✅ Отправка кода подтверждения VK:', confirmCode);
     res.status(200).send(confirmCode);
   } else if (req.body.type === 'message_new') {
-    // Проверяем, не является ли сообщение дубликатом
+    // Сначала отправляем ответ VK, чтобы они не повторяли запрос
+    res.status(200).send('ok');
+    
     try {
-      const vkBot = require('./vk-bot');
+      // Сразу проверяем, является ли сообщение командой "оплатил"
       const message = req.body.object?.message?.text?.toLowerCase().trim() || '';
-      const userId = req.body.object?.message?.from_id || 0;
-      const messageId = req.body.object?.message?.id || 0;
-      
-      if (vkBot.isDuplicateMessage && typeof vkBot.isDuplicateMessage === 'function') {
-        const isDuplicate = vkBot.isDuplicateMessage(userId, message, messageId);
+      if (message === 'оплатил' || message === 'оплатила') {
+        console.log('⚠️ Получена команда "оплатил" через Callback API, дополнительная проверка');
         
-        if (isDuplicate) {
-          console.log(`⚠️ Callback API: Получен дубликат сообщения от ${userId}: "${message}"`);
-        } else {
-          console.log(`✅ Callback API: Новое сообщение от ${userId}: "${message}"`);
-        }
+        // Для команды "оплатил" ничего дополнительно делать не будем,
+        // обработчик сообщений в vk-bot.js сам разберётся с блокировками
       }
     } catch (err) {
-      console.error('Ошибка при проверке дубликата в Callback API:', err);
+      console.error('Ошибка при обработке message_new в Callback API:', err);
     }
-    
-    console.log('👍 Подтверждение получения события VK');
-    res.status(200).send('ok');
   } else {
+    // Для всех остальных событий просто отправляем ok
     console.log('👍 Подтверждение получения события VK');
     res.status(200).send('ok');
   }

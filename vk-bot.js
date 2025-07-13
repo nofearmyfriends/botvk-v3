@@ -5,50 +5,8 @@ const fs = require('fs');
 const path = require('path');
 require('dotenv').config();
 
-// Система дедупликации сообщений
-const processedMessages = new Map(); // messageId -> timestamp
-const messageCache = new Map(); // userId_message -> timestamp
-
-// Функция для проверки дублирования сообщений
-function isDuplicateMessage(userId, message, messageId) {
-  // Проверяем по messageId
-  if (messageId && processedMessages.has(messageId)) {
-    return true;
-  }
-  
-  // Проверяем по содержимому и ID пользователя
-  const key = `${userId}_${message}`;
-  const now = Date.now();
-  const lastTime = messageCache.get(key);
-  
-  if (lastTime && now - lastTime < 5000) { // 5 секунд между одинаковыми сообщениями
-    console.log(`Дублирующееся сообщение от ${userId}: "${message}"`);
-    return true;
-  }
-  
-  // Запоминаем сообщение
-  if (messageId) {
-    processedMessages.set(messageId, now);
-  }
-  messageCache.set(key, now);
-  
-  // Очищаем старые сообщения (старше 10 минут)
-  if (processedMessages.size > 1000 || messageCache.size > 1000) {
-    const tenMinutesAgo = now - 600000;
-    for (const [key, time] of processedMessages.entries()) {
-      if (time < tenMinutesAgo) {
-        processedMessages.delete(key);
-      }
-    }
-    for (const [key, time] of messageCache.entries()) {
-      if (time < tenMinutesAgo) {
-        messageCache.delete(key);
-      }
-    }
-  }
-  
-  return false;
-}
+// Система блокировки дублирующихся ответов
+const userLocks = new Set();
 
 // Инициализация ВК бота
 const vk = new VK({
@@ -119,13 +77,6 @@ vk.updates.on('message_new', async (context) => {
   // Проверяем существование текста сообщения перед вызовом toLowerCase()
   const message = context.text ? context.text.toLowerCase().trim() : '';
   console.log(`Получено сообщение от пользователя ${context.senderId}: ${message}`);
-  
-  // Проверка на дублирование сообщения
-  const messageId = context.id || context.conversationMessageId;
-  if (isDuplicateMessage(context.senderId, message, messageId)) {
-    console.log(`⚠️ Обнаружен дубликат сообщения от пользователя ${context.senderId}: ${message}`);
-    return;
-  }
   
   // Защита от спама/флуда
   const userId = context.senderId;
@@ -228,18 +179,19 @@ vk.updates.on('message_new', async (context) => {
     if (message === 'оплатил' || message === 'оплатила') {
     console.log(`Обрабатываем сообщение 'оплатил' от пользователя ${context.senderId}`);
     
-    // Дополнительная проверка на дублирование для критичной операции
-    const paymentKey = `payment_${context.senderId}`;
-    const now = Date.now();
-    const lastPaymentTime = messageCache.get(paymentKey);
+    // Блокируем повторную обработку сообщения "оплатил" от одного пользователя
+    const userId = context.senderId;
+    const lockKey = `payment_${userId}`;
     
-    if (lastPaymentTime && now - lastPaymentTime < 30000) { // 30 секунд между командами оплаты
-      console.log(`⚠️ Повторная команда оплаты от ${context.senderId} менее чем через 30 секунд`);
-      await context.send('Ваш запрос уже обрабатывается. Пожалуйста, подождите.');
-      return;
+    // Проверяем, не обрабатывается ли уже запрос от этого пользователя
+    if (userLocks.has(lockKey)) {
+      console.log(`⚠️ Блокировка повторной обработки для пользователя ${userId}`);
+      return; // Не отправляем сообщение, просто игнорируем повторный запрос
     }
     
-    messageCache.set(paymentKey, now);
+    // Ставим блокировку
+    userLocks.add(lockKey);
+    console.log(`🔒 Блокировка установлена для ${userId}`);
     
     try {
       // Сначала проверяем статус подписки VK Donut
@@ -345,6 +297,16 @@ vk.updates.on('message_new', async (context) => {
       }
       
       await sendWithKeyboard(context, errorMessage);
+    } finally {
+      // Снимаем блокировку после завершения операции (успешной или с ошибкой)
+      userLocks.delete(lockKey);
+      console.log(`🔓 Блокировка снята для ${userId}`);
+      
+      // Дополнительно очищаем старые блокировки (если они есть)
+      if (userLocks.size > 1000) {
+        console.log('Очистка старых блокировок');
+        userLocks.clear();
+      }
     }
   }
 
@@ -363,21 +325,13 @@ vk.updates.on('message_new', async (context) => {
 // (удалён по требованию — бот отвечает только на команду "Оплатил")
 
 // Функция запуска бота
-let botStarted = false;
-
 async function startVkBot() {
-  if (botStarted) {
-    console.log('VK бот уже запущен, избегаем повторной инициализации');
-    return;
-  }
-  
   try {
     console.log('Запуск VK бота...');
     
     // Запускаем обработку обновлений
     await vk.updates.start();
     console.log('VK бот успешно запущен');
-    botStarted = true;
     
     // Регистрируем в системе мониторинга
     try {
@@ -405,6 +359,5 @@ async function startVkBot() {
 module.exports = {
   vk,
   isAdmin,
-  startVkBot,
-  isDuplicateMessage
+  startVkBot
 }; 
