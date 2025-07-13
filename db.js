@@ -66,6 +66,21 @@ async function updateUsersTableStructure() {
         }));
       }
       
+      // Проверяем наличие колонки key_used
+      if (!columns.includes('key_used')) {
+        operations.push(new Promise((resolve, reject) => {
+          db.run(`ALTER TABLE users ADD COLUMN key_used INTEGER DEFAULT 0`, (err) => {
+            if (err) {
+              console.warn('Ошибка при добавлении колонки key_used:', err);
+              reject(err);
+            } else {
+              console.log('Добавлена колонка key_used в таблицу users');
+              resolve();
+            }
+          });
+        }));
+      }
+      
       // Если нет колонки is_active, добавляем её
       if (!columns.includes('is_active')) {
         operations.push(new Promise((resolve, reject) => {
