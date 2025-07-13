@@ -98,31 +98,31 @@ app.use(bodyParser.json());
 // Запуск приложения
 async function startApp() {
   try {
-    console.log('Запуск приложения...');
+    console.log('🚀 Запуск приложения на CodeSandbox...');
     
     // Инициализация базы данных
-    console.log('Инициализация базы данных...');
+    console.log('📊 Инициализация базы данных...');
     await db.initDatabase();
     
     // Запуск резервного копирования
-    console.log('Настройка автоматического резервного копирования...');
+    console.log('💾 Настройка автоматического резервного копирования...');
     db.scheduleBackups(24, 7); // раз в день, хранить 7 дней
     
     // Запуск системы мониторинга
-    console.log('Запуск системы мониторинга...');
+    console.log('🔍 Запуск системы мониторинга...');
     const utils = require('./utils');
     utils.monitoring.startMonitoring(300000); // проверка раз в 5 минут
     
     // Запускаем синхронизацию списка пользователей из VK
     if (process.env.ENABLE_VK_SYNC === 'true') {
-      console.log('Включена синхронизация списка пользователей из VK');
+      console.log('🔄 Включена синхронизация списка пользователей из VK');
       utils.scheduleUsersSync(6); // Синхронизация каждые 6 часов
     } else {
-      console.log('Синхронизация списка пользователей из VK отключена');
+      console.log('⏸️ Синхронизация списка пользователей из VK отключена');
     }
     
     // Запуск ВК бота
-    console.log('Запуск VK бота...');
+    console.log('🎭 Запуск VK бота...');
     console.log('resolved vk-bot', require.resolve('./vk-bot'));
 
     const vkBotModule = require('./vk-bot');
@@ -131,23 +131,23 @@ async function startApp() {
     if (typeof vkBotModule.startVkBot === 'function') {
       await vkBotModule.startVkBot();
     } else {
-      console.error('startVkBot отсутствует – VK-бот не запущен');
+      console.error('❌ startVkBot отсутствует – VK-бот не запущен');
     }
     
     // Запуск Telegram бота
-    console.log('Запуск Telegram бота...');
+    console.log('🤖 Запуск Telegram бота...');
     await tgBot.startTgBot();
     
     // Запуск ежедневной проверки подписок
-    console.log('Настройка ежедневной проверки подписок...');
+    console.log('⏰ Настройка ежедневной проверки подписок...');
     cron.scheduleDailyCheck();
     
     // Запуск еженедельной очистки сообщений
-    console.log('Настройка еженедельной очистки сообщений...');
+    console.log('🧹 Настройка еженедельной очистки сообщений...');
     cron.scheduleWeeklyCleanup();
     
     // Запуск системы самопинга для предотвращения засыпания
-    console.log('Запуск системы самопинга...');
+    console.log('🔄 Запуск системы самопинга...');
     selfPing.startSelfPing();
     
     // Создание директории для логов, если её нет
@@ -156,7 +156,7 @@ async function startApp() {
     const logsDir = path.join(__dirname, 'logs');
     if (!fs.existsSync(logsDir)) {
       fs.mkdirSync(logsDir, { recursive: true });
-      console.log('Создана директория для логов:', logsDir);
+      console.log('📁 Создана директория для логов:', logsDir);
     }
     
     console.log('✅ Приложение успешно запущено');
@@ -167,6 +167,7 @@ async function startApp() {
 Время: ${new Date().toISOString()}
 Версия Node: ${process.version}
 Платформа: ${process.platform}
+Хостинг: CodeSandbox
 Uptime: ${process.uptime()} сек
 ============================
 `;
@@ -183,10 +184,10 @@ Uptime: ${process.uptime()} сек
         }, 60000); // 1 минута
       }
     } catch (e) {
-      console.error('Ошибка отправки отчета при запуске:', e);
+      console.error('❌ Ошибка отправки отчета при запуске:', e);
     }
 
-    console.log('Система запущена')
+    console.log('🎉 Система запущена на CodeSandbox')
     
   } catch (error) {
     console.error('❌ Критическая ошибка при запуске приложения:', error);
@@ -220,30 +221,50 @@ ${error.stack}
     process.exit(1);
   }
 }
-// VK Callback API confirmation
+
+// VK Callback API confirmation - для подключения к группе ВК
 app.post('/', (req, res) => {
+  console.log('📞 Получен запрос VK Callback API:', req.body);
+  
   if (req.body.type === 'confirmation') {
-    const confirmCode = process.env.VK_CONFIRMATION_CODE;
-    if (!confirmCode) {
-      console.error('VK_CONFIRMATION_CODE не задан в .env');
-      return res.status(500).send('env error');
-    }
+    // Используем код подтверждения из переменных окружения или дефолтный
+    const confirmCode = process.env.VK_CONFIRMATION_CODE || '6100c54a';
+    console.log('✅ Отправка кода подтверждения VK:', confirmCode);
     res.status(200).send(confirmCode);
   } else {
+    console.log('👍 Подтверждение получения события VK');
     res.status(200).send('ok');
   }
 });
 
-// Обработка GET / — нужен для keep-alive
+// Обработка GET / — главная страница и health check
 app.get('/', (req, res) => {
-  res.status(200).send('ok');
+  const status = {
+    status: 'ok',
+    service: 'VK-TG Bot',
+    hosting: 'CodeSandbox',
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime()
+  };
+  res.status(200).json(status);
 });
 
-// Для AMVERA и продакшена используем порт 80, иначе 3000
-const PORT = process.env.NODE_ENV === 'production' ? 80 : (process.env.PORT || 3000);
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.status(200).json({
+    status: 'healthy',
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime()
+  });
+});
+
+// Порт для CodeSandbox (по умолчанию 3000)
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log('Express server for VK Callback API запущен на порту', PORT);
-  // Запускаем периодический пинг, чтобы контейнер Glitch не засыпал
+  console.log(`🌐 Express server запущен на порту ${PORT} (CodeSandbox)`);
+  console.log(`📍 VK Callback API URL: https://your-sandbox-id.csb.app/`);
+  
+  // Запускаем упрощенный keep-alive для CodeSandbox
   startKeepAlive();
 });
 
@@ -251,69 +272,28 @@ app.listen(PORT, () => {
 startApp();
 
 // --------------------------------------------------------------
-// Улучшенный Keep-alive: адаптивная система предотвращения засыпания в Glitch
+// Упрощенный Keep-alive для CodeSandbox
 // --------------------------------------------------------------
 function startKeepAlive() {
-  console.log('🔄 Keep-alive: запуск системы с альтернативными методами поддержания активности');
+  console.log('🔄 Keep-alive: запуск системы поддержания активности для CodeSandbox');
   
-  // Импорт необходимых модулей
   const fs = require('fs');
   const path = require('path');
   
-  // 1. Локальный пинг через собственный URL (если работает)
-  const baseInterval = Number(process.env.KEEP_ALIVE_INTERVAL_MS) || 270000; // ~4.5 минуты
-  
-  // 2. Работа с файлами для симуляции активности
-  const fsInterval = 150000; // 2.5 минуты
-  
-  // 3. Легкие вычисления для поддержания CPU активным
-  const cpuInterval = 180000; // 3 минуты
+  // Интервал активности (каждые 4 минуты)
+  const interval = Number(process.env.KEEP_ALIVE_INTERVAL_MS) || 240000;
   
   // Статистика для мониторинга
   const stats = {
     totalActivities: 0,
     fileActivities: 0,
-    cpuActivities: 0,
-    httpActivities: 0
+    httpRequests: 0
   };
   
-  // Главный ping: пытаемся поддерживать активность через собственный endpoint
-  setInterval(() => {
+  // Основная функция поддержания активности
+  const keepAlive = () => {
     try {
-      const domain = process.env.PROJECT_DOMAIN;
-      if (domain) {
-        const url = `https://${domain}.glitch.me/`;
-        console.log(`👋 Keep-alive: самопинг ${url}`);
-        
-        const httpLib = require('https');
-        const req = httpLib.get(url, { timeout: 10000 }, (res) => {
-          if (res.statusCode === 200) {
-            stats.httpActivities++;
-            console.log('✅ Keep-alive: самопинг успешен');
-          }
-          res.on('data', () => {});
-          res.on('end', () => {});
-        });
-        
-        req.on('error', (err) => {
-          console.log(`ℹ️ Keep-alive: ошибка самопинга (игнорируется): ${err.message}`);
-        });
-        
-        req.on('timeout', () => {
-          req.abort();
-        });
-      }
-    } catch (error) {
-      // Игнорируем ошибки самопинга, они не критичны
-      console.log(`ℹ️ Keep-alive: исключение самопинга (игнорируется): ${error.message}`);
-    }
-    
-    stats.totalActivities++;
-  }, baseInterval);
-  
-  // Метод 2: Работа с файловой системой для поддержания активности
-  const fsKeepAlive = () => {
-    try {
+      // 1. Обновляем файл активности
       const tmpDir = path.join(__dirname, 'tmp');
       if (!fs.existsSync(tmpDir)) {
         fs.mkdirSync(tmpDir, { recursive: true });
@@ -321,52 +301,38 @@ function startKeepAlive() {
       
       const keepAliveFile = path.join(tmpDir, 'keep-alive.txt');
       const timestamp = new Date().toISOString();
-      fs.writeFileSync(keepAliveFile, `Keep-alive: ${timestamp}\n`);
+      fs.writeFileSync(keepAliveFile, `Keep-alive: ${timestamp}\nHosting: CodeSandbox\n`);
       
       stats.fileActivities++;
-    } catch (error) {
-      console.log(`ℹ️ Keep-alive FS: ошибка (игнорируется): ${error.message}`);
-    }
-  };
-  
-  // Метод 3: CPU активность через легкие вычисления
-  const cpuKeepAlive = () => {
-    try {
-      const startTime = Date.now();
-      // Некритичные вычисления для поддержания CPU активным
-      let sum = 0;
-      for (let i = 0; i < 100000; i++) {
-        sum += Math.random() * i;
+      stats.totalActivities++;
+      
+      console.log(`🔄 Keep-alive активность: ${timestamp}`);
+      
+      // 2. Обновляем статус в мониторинге
+      try {
+        const utils = require('./utils');
+        if (utils && utils.monitoring) {
+          utils.monitoring.updateServiceStatus('keepAlive', true);
+        }
+      } catch (error) {
+        console.log(`ℹ️ Keep-alive: ошибка обновления мониторинга: ${error.message}`);
       }
-      const duration = Date.now() - startTime;
-      stats.cpuActivities++;
+      
     } catch (error) {
-      console.log(`ℹ️ Keep-alive CPU: ошибка (игнорируется): ${error.message}`);
+      console.log(`ℹ️ Keep-alive: ошибка (игнорируется): ${error.message}`);
     }
   };
   
-  // Запускаем дополнительные стратегии поддержания активности
-  setInterval(fsKeepAlive, fsInterval);
-  setInterval(cpuKeepAlive, cpuInterval);
+  // Запускаем активность каждые 4 минуты
+  setInterval(keepAlive, interval);
   
-  // Сразу запускаем первые активности
-  setTimeout(fsKeepAlive, 2000);
-  setTimeout(cpuKeepAlive, 5000);
+  // Сразу запускаем первую активность
+  setTimeout(keepAlive, 2000);
   
-  // Каждые 30 минут выводим статистику
+  // Статистика каждые 30 минут
   setInterval(() => {
-    console.log(`[Keep-alive статистика] Всего активностей: ${stats.totalActivities}, файловых: ${stats.fileActivities}, CPU: ${stats.cpuActivities}, HTTP: ${stats.httpActivities}`);
-    
-    // Обновляем статус в мониторинге
-    try {
-      const utils = require('./utils');
-      if (utils && utils.monitoring) {
-        utils.monitoring.updateServiceStatus('keepAlive', true);
-      }
-    } catch (error) {
-      console.log(`ℹ️ Keep-alive: ошибка обновления мониторинга: ${error.message}`);
-    }
-  }, 1800000); // Каждые 30 минут
+    console.log(`📊 [Keep-alive статистика] Всего активностей: ${stats.totalActivities}, файловых: ${stats.fileActivities}`);
+  }, 1800000);
   
   // Инициализируем статус в мониторинге
   try {
