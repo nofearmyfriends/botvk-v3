@@ -226,6 +226,29 @@ app.post('/', (req, res) => {
     const confirmCode = process.env.VK_CONFIRMATION_CODE || '6100c54a';
     console.log('✅ Отправка кода подтверждения VK:', confirmCode);
     res.status(200).send(confirmCode);
+  } else if (req.body.type === 'message_new') {
+    // Проверяем, не является ли сообщение дубликатом
+    try {
+      const vkBot = require('./vk-bot');
+      const message = req.body.object?.message?.text?.toLowerCase().trim() || '';
+      const userId = req.body.object?.message?.from_id || 0;
+      const messageId = req.body.object?.message?.id || 0;
+      
+      if (vkBot.isDuplicateMessage && typeof vkBot.isDuplicateMessage === 'function') {
+        const isDuplicate = vkBot.isDuplicateMessage(userId, message, messageId);
+        
+        if (isDuplicate) {
+          console.log(`⚠️ Callback API: Получен дубликат сообщения от ${userId}: "${message}"`);
+        } else {
+          console.log(`✅ Callback API: Новое сообщение от ${userId}: "${message}"`);
+        }
+      }
+    } catch (err) {
+      console.error('Ошибка при проверке дубликата в Callback API:', err);
+    }
+    
+    console.log('👍 Подтверждение получения события VK');
+    res.status(200).send('ok');
   } else {
     console.log('👍 Подтверждение получения события VK');
     res.status(200).send('ok');
