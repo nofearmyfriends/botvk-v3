@@ -42,6 +42,78 @@ const adminIds = process.env.ADMIN_VK_IDS ?
   process.env.ADMIN_VK_IDS.split(',').map(id => Number(id.trim())) : 
   [];
 
+// Защита от дублирования обработки сообщений "оплатил"
+const processingUsers = new Map(); // Используем Map для хранения времени последней обработки
+const activeProcessing = new Set(); // Для немедленной блокировки параллельных запросов
+
+// Дедупликация сообщений VK API (защита от получения одного сообщения несколько раз)
+const processedMessages = new Map(); // messageId -> timestamp
+
+// НОВАЯ СИСТЕМА: Дедупликация по тексту сообщения и пользователю
+const processedTextMessages = new Map(); // "userId_messageText_timestamp" -> timestamp
+
+// Функция для создания уникального ключа сообщения по тексту
+function createTextMessageKey(userId, messageText, timestamp) {
+  // Округляем timestamp до секунд, чтобы сообщения в одну секунду считались дубликатами
+  const roundedTimestamp = Math.floor(timestamp / 1000);
+  return `${userId}_${messageText.toLowerCase().trim()}_${roundedTimestamp}`;
+}
+
+// Функция очистки старых записей из processingUsers
+function cleanupProcessingUsers() {
+  const now = Date.now();
+  const CLEANUP_TIME = 60000; // Удаляем записи старше 1 минуты
+  
+  for (const [userId, timestamp] of processingUsers.entries()) {
+    if (now - timestamp > CLEANUP_TIME) {
+      processingUsers.delete(userId);
+    }
+  }
+}
+
+// Функция очистки старых записей из activeProcessing (аварийная очистка)
+function cleanupActiveProcessing() {
+  const now = Date.now();
+  // Если в activeProcessing есть записи дольше 2 минут, удаляем их
+  // (это не должно происходить при нормальной работе)
+  if (activeProcessing.size > 0) {
+    console.log(`🧹 Аварийная очистка активной обработки. Текущий размер: ${activeProcessing.size}`);
+    activeProcessing.clear();
+  }
+}
+
+// Функция очистки старых обработанных сообщений VK
+function cleanupProcessedMessages() {
+  const now = Date.now();
+  const CLEANUP_TIME = 300000; // Удаляем записи старше 5 минут
+  
+  for (const [messageId, timestamp] of processedMessages.entries()) {
+    if (now - timestamp > CLEANUP_TIME) {
+      processedMessages.delete(messageId);
+    }
+  }
+}
+
+// Функция очистки старых обработанных текстовых сообщений
+function cleanupProcessedTextMessages() {
+  const now = Date.now();
+  const CLEANUP_TIME = 30000; // Удаляем записи старше 30 секунд
+  
+  for (const [messageKey, timestamp] of processedTextMessages.entries()) {
+    if (now - timestamp > CLEANUP_TIME) {
+      processedTextMessages.delete(messageKey);
+    }
+  }
+}
+
+// Периодическая очистка каждые 30 секунд (увеличена частота)
+setInterval(() => {
+  cleanupProcessingUsers();
+  cleanupActiveProcessing();
+  cleanupProcessedMessages();
+  cleanupProcessedTextMessages();
+}, 30000); // 30 секунд
+
 // Выводим переменные окружения для отладки
 console.log('==== DEBUG INFO ====');
 console.log('VK_TOKEN:', process.env.VK_TOKEN ? 'Set (hidden)' : 'Not set');
@@ -71,12 +143,39 @@ vk.updates.on('message_new', async (context) => {
   // Игнорируем сообщения от сообществ и исходящие сообщения
   if (context.isOutbox || context.senderType !== 'user') return;
 
-  // Проверяем существование текста сообщения перед вызовом toLowerCase()
-  const message = context.text ? context.text.toLowerCase().trim() : '';
-  console.log(`Получено сообщение от пользователя ${context.senderId}: ${message}`);
-  
-  // Защита от спама/флуда
+  const now = Date.now();
+  const messageText = context.text ? context.text.toLowerCase().trim() : '';
   const userId = context.senderId;
+  
+  // ЗАЩИТА ОТ ДУБЛИРОВАНИЯ СООБЩЕНИЙ VK API
+  const messageId = context.id;
+  const conversationMessageId = context.conversationMessageId;
+  
+  // Создаем уникальный ключ для сообщения по ID
+  const messageKey = `${userId}_${messageId}_${conversationMessageId}`;
+  
+  if (processedMessages.has(messageKey)) {
+    console.log(`🔄 ДУБЛИКАТ VK API (ID): Сообщение ${messageKey} уже обработано, игнорируем`);
+    return;
+  }
+  
+  // НОВАЯ ЗАЩИТА: Дедупликация по тексту сообщения
+  const textMessageKey = createTextMessageKey(userId, messageText, now);
+  
+  if (processedTextMessages.has(textMessageKey)) {
+    console.log(`🔄 ДУБЛИКАТ VK API (ТЕКСТ): Сообщение "${messageText}" от ${userId} уже обработано, игнорируем`);
+    return;
+  }
+  
+  // Записываем сообщение как обработанное (по ID и по тексту)
+  processedMessages.set(messageKey, now);
+  processedTextMessages.set(textMessageKey, now);
+  
+  console.log(`📝 Новое сообщение от ${userId}: "${messageText}"`);
+  console.log(`📝 Ключи: ID=${messageKey}, ТЕКСТ=${textMessageKey}`);
+  console.log(`📊 Размеры: processedMessages=${processedMessages.size}, processedTextMessages=${processedTextMessages.size}`);
+
+  // Защита от спама/флуда
   
   // Проверяем, не заблокирован ли пользователь за спам
   if (utils.antiSpam.isBlocked(userId)) {
@@ -86,8 +185,8 @@ vk.updates.on('message_new', async (context) => {
   }
   
   // Проверка содержимого на спам
-  if (message && utils.antiSpam.checkSpamContent(message)) {
-    console.warn(`Обнаружен спам-контент от пользователя ${userId}: ${message}`);
+  if (messageText && utils.antiSpam.checkSpamContent(messageText)) {
+    console.warn(`Обнаружен спам-контент от пользователя ${userId}: ${messageText}`);
     await context.send('❌ Ваше сообщение содержит запрещенный контент.');
     utils.antiSpam.addWarning(userId);
     return;
@@ -102,7 +201,7 @@ vk.updates.on('message_new', async (context) => {
   }
   
   // Тестовая команда для проверки конфигурации
-  if (message === '/test') {
+  if (messageText === '/test') {
     const isAdminUser = isAdmin(context.senderId);
     
     // Различные ответы для администраторов и обычных пользователей
@@ -124,7 +223,7 @@ vk.updates.on('message_new', async (context) => {
   }
 
   // Команда для администраторов: просмотр ожидающих пользователей
-  if (message === '/pending' && isAdmin(context.senderId)) {
+  if (messageText === '/pending' && isAdmin(context.senderId)) {
     try {
       const pendingUsers = await db.getAllPendingUsers();
       
@@ -156,9 +255,9 @@ vk.updates.on('message_new', async (context) => {
   }
 
   // Команда для администраторов: одобрение пользователя
-  if (message.startsWith('/approve ') && isAdmin(context.senderId)) {
+  if (messageText.startsWith('/approve ') && isAdmin(context.senderId)) {
     try {
-      const userId = Number(message.split(' ')[1]);
+      const userId = Number(messageText.split(' ')[1]);
       if (isNaN(userId)) {
         await context.send('Некорректный ID пользователя');
         return;
@@ -173,8 +272,52 @@ vk.updates.on('message_new', async (context) => {
     return;
   }
 
-    if (message === 'оплатил' || message === 'оплатила') {
-    console.log(`🔄 Обрабатываем сообщение 'оплатил' от пользователя ${context.senderId}`);
+  if (messageText === 'оплатил' || messageText === 'оплатила') {
+    console.log(`🔄 Получено сообщение 'оплатил' от пользователя ${context.senderId} (messageId: ${context.id})`);
+    console.log(`📊 Статус обработки: activeProcessing.size=${activeProcessing.size}, processingUsers.size=${processingUsers.size}, processedMessages.size=${processedMessages.size}`);
+    
+    // АТОМАРНАЯ ПРОВЕРКА И БЛОКИРОВКА: Исправляем race condition
+    if (activeProcessing.has(context.senderId)) {
+      console.log(`🚫 БЛОКИРОВКА: Пользователь ${context.senderId} уже обрабатывается, игнорируем параллельный запрос`);
+      console.log(`🚫 Список активных: [${Array.from(activeProcessing).join(', ')}]`);
+      return;
+    }
+    
+    // Немедленно добавляем в список активной обработки (атомарно с проверкой)
+    activeProcessing.add(context.senderId);
+    console.log(`🔒 Пользователь ${context.senderId} добавлен в активную обработку. Текущий размер: ${activeProcessing.size}`);
+    
+    // ПРОВЕРКА КУЛДАУНА: Проверка времени последней обработки
+    const lastProcessed = processingUsers.get(context.senderId);
+    const COOLDOWN_TIME = 10000; // Уменьшено до 10 секунд для лучшего UX
+    
+    if (lastProcessed && (now - lastProcessed) < COOLDOWN_TIME) {
+      const timeLeft = Math.ceil((COOLDOWN_TIME - (now - lastProcessed)) / 1000);
+      console.log(`⚠️ Пользователь ${context.senderId} слишком часто отправляет "оплатил". Осталось подождать: ${timeLeft} сек`);
+      
+      // Убираем из активной обработки и отправляем сообщение
+      activeProcessing.delete(context.senderId);
+      console.log(`🔓 Пользователь ${context.senderId} удален из активной обработки (cooldown). Размер: ${activeProcessing.size}`);
+      
+      await context.send(`⏳ Подождите ${timeLeft} секунд перед повторной отправкой команды "оплатил"`);
+      return;
+    }
+    
+    // Добавляем пользователя в список с текущим временем
+    processingUsers.set(context.senderId, now);
+    console.log(`🔄 Начинаем обработку сообщения 'оплатил' от пользователя ${context.senderId}`);
+    
+    // Функция для гарантированной очистки (вызывается в любом случае)
+    const cleanup = () => {
+      activeProcessing.delete(context.senderId);
+      console.log(`🔓 Пользователь ${context.senderId} удален из активной обработки (cleanup). Размер: ${activeProcessing.size}`);
+    };
+    
+    // Таймаут для аварийной очистки (если что-то пойдет не так)
+    const timeoutId = setTimeout(() => {
+      console.log(`⚠️ АВАРИЙНАЯ ОЧИСТКА: Пользователь ${context.senderId} висел в activeProcessing слишком долго`);
+      cleanup();
+    }, 60000); // 60 секунд
     
     try {
       // Сначала проверяем статус подписки VK Donut
@@ -205,10 +348,11 @@ vk.updates.on('message_new', async (context) => {
         // Проверяем, был ли уже выдан ключ
         console.log(`🔍 Этап 5: Проверка существующего ключа...`);
         const existingKey = await db.getUserKey(context.senderId);
+        console.log(`✅ Этап 5 завершен: existingKey для ${context.senderId} => ${existingKey}`);
         
         if (existingKey) {
           // Для всех пользователей с активной подпиской показываем существующий ключ
-          console.log(`Пользователь ${context.senderId} уже имеет ключ: ${existingKey}`);
+          console.log(`📤 Отправка сообщения с существующим ключом ${existingKey} пользователю ${context.senderId}`);
           await context.send(
             `У вас активная подписка VK Donut!\n` +
             `Ваш код доступа 👉 \"${existingKey}\"\n` +
@@ -216,12 +360,17 @@ vk.updates.on('message_new', async (context) => {
             `которая находится на стене VK Donut сообщества.`,
             { keyboard: getKeyboard() }
           );
+          console.log(`✅ Сообщение с существующим ключом отправлено пользователю ${context.senderId}`);
         } else {
           // Генерируем новый ключ для новых или принудительно одобренных пользователей
+          console.log(`🔑 Генерация нового ключа для пользователя ${context.senderId}`);
           const accessKey = await utils.generateUniqueKey();
+          console.log(`✅ Сгенерирован новый ключ: ${accessKey}`);
           
           // Сохраняем информацию в базу данных
+          console.log(`💾 Сохранение платежа в базу данных...`);
           await db.savePayment(context.senderId, accessKey);
+          console.log(`✅ Платеж сохранен в базу данных`);
           
           // Сохраняем информацию о пользователе
           try {
@@ -234,6 +383,7 @@ vk.updates.on('message_new', async (context) => {
             console.warn(`Не удалось сохранить информацию о пользователе ${context.senderId}:`, userInfoError.message);
           }
           
+          console.log(`📤 Отправка сообщения с новым ключом ${accessKey} пользователю ${context.senderId}`);
           await context.send(
             `Отлично, Вы Дон сообщества.\n` +
             `Ваш уникальный код доступа 👉 \"${accessKey}\"\n` +
@@ -241,37 +391,50 @@ vk.updates.on('message_new', async (context) => {
             `которая находится на стене VK Donut сообщества.`,
             { keyboard: getKeyboard() }
           );
-        }
-      } else {
-        // Пользователь не является пользователем
-        console.log(`❌ Пользователь ${context.senderId} НЕ подтвержден как пользователь`);
-        
-        if (hasPayment === undefined || hasPayment === null) {
-          await context.send('Не удалось проверить статус подписки. Пожалуйста, попробуйте позже.', 
-            { keyboard: getKeyboard() });
-          return;
+          console.log(`✅ Сообщение с новым ключом отправлено пользователю ${context.senderId}`);
         }
         
-        // Проверяем, был ли у пользователя ранее ключ (подписка истекла)
-        const oldKey = await db.getUserKey(context.senderId);
-        if (oldKey) {
-          await context.send(
-            'Ваша подписка VK Donut истекла. Пожалуйста, оформите новую подписку через VK Donut.\n\n' +
-            'После оформления подписки попробуйте снова через несколько минут.', 
-            { keyboard: getKeyboard() }
-          );
-        } else {
-          await context.send(
-            'Оплата не найдена. Пожалуйста, убедитесь, что вы оформили подписку через VK Donut.\n\n' +
-            'Если вы только что оформили подписку, подождите несколько минут и попробуйте снова.\n\n' +
-            'Если проблема сохраняется, обратитесь к администратору.', 
-            { keyboard: getKeyboard() }
-          );
-        }
-        
-        // Логируем для администратора
-        console.log(`Пользователь ${context.senderId} не найден в VK Donut. Добавлен в список ожидающих проверки.`);
+        // Очищаем таймаут и активную обработку
+        clearTimeout(timeoutId);
+        cleanup();
+        return;
       }
+      
+      // Пользователь не является пользователем
+      console.log(`❌ Пользователь ${context.senderId} НЕ подтвержден как пользователь`);
+      
+      if (hasPayment === undefined || hasPayment === null) {
+        await context.send('Не удалось проверить статус подписки. Пожалуйста, попробуйте позже.', 
+          { keyboard: getKeyboard() });
+        clearTimeout(timeoutId);
+        cleanup();
+        return;
+      }
+      
+      // Проверяем, был ли у пользователя ранее ключ (подписка истекла)
+      const oldKey = await db.getUserKey(context.senderId);
+      if (oldKey) {
+        await context.send(
+          'Ваша подписка VK Donut истекла. Пожалуйста, оформите новую подписку через VK Donut.\n\n' +
+          'После оформления подписки попробуйте снова через несколько минут.', 
+          { keyboard: getKeyboard() }
+        );
+      } else {
+        await context.send(
+          'Оплата не найдена. Пожалуйста, убедитесь, что вы оформили подписку через VK Donut.\n\n' +
+          'Если вы только что оформили подписку, подождите несколько минут и попробуйте снова.\n\n' +
+          'Если проблема сохраняется, обратитесь к администратору.', 
+          { keyboard: getKeyboard() }
+        );
+      }
+      
+      // Логируем для администратора
+      console.log(`Пользователь ${context.senderId} не найден в VK Donut. Добавлен в список ожидающих проверки.`);
+      
+      // Очищаем таймаут и активную обработку
+      clearTimeout(timeoutId);
+      cleanup();
+      
     } catch (error) {
       console.error('❌ Ошибка при обработке платежа для пользователя', context.senderId, ':', error);
       console.error('Stack trace:', error.stack);
@@ -295,11 +458,15 @@ vk.updates.on('message_new', async (context) => {
       }
       
       await sendWithKeyboard(context, errorMessage);
+      
+      // Очищаем таймаут и активную обработку в случае ошибки
+      clearTimeout(timeoutId);
+      cleanup();
     }
   }
 
   // Показ интерактивного меню
-  if (message === '/start' || message === 'начать') {
+  if (messageText === '/start' || messageText === 'начать') {
     await context.send('Выберите действие:', {
       keyboard: getKeyboard()
     });
