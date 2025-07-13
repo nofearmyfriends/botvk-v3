@@ -253,8 +253,8 @@ app.get('/health', (req, res) => {
   });
 });
 
-// Порт для CodeSandbox (по умолчанию 3000)
-const PORT = process.env.PORT || 3000;
+// Порт для CodeSandbox (по умолчанию 3000, но можно использовать 3001 при конфликте)
+const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
   console.log(`🌐 Express server запущен на порту ${PORT} (CodeSandbox)`);
   console.log(`📍 VK Callback API URL: https://your-sandbox-id.csb.app/`);

@@ -169,7 +169,7 @@ async function checkVkDonutPayment(userId) {
   
   // Проверяем наличие пользователя в восстановленном списке
   try {
-    const restoredUsers = await db.getRestoredUsers();
+    const restoredUsers = await db.getRestoredDonors();
     const isUserInRestoredList = restoredUsers.some(user =>
       user.vk_id === userIdNum ||
       user.vk_id === 823475551 || // ID Артема Мокропулова
@@ -767,7 +767,7 @@ async function syncUsersFromVk() {
     console.log(`Всего найдено ${users.length} пользователей в группе VK`);
     
     // Получаем список существующих пользователей из базы данных
-    const existingUsers = await db.getRestoredUsers().catch(err => {
+    const existingUsers = await db.getRestoredDonors().catch(err => {
       console.error('Ошибка при получении существующих пользователей:', err);
       return [];
     });

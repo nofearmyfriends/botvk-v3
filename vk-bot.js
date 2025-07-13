@@ -174,29 +174,36 @@ vk.updates.on('message_new', async (context) => {
   }
 
     if (message === 'оплатил' || message === 'оплатила') {
-    console.log(`Обрабатываем сообщение 'оплатил' от пользователя ${context.senderId}`);
+    console.log(`🔄 Обрабатываем сообщение 'оплатил' от пользователя ${context.senderId}`);
     
     try {
       // Сначала проверяем статус подписки VK Donut
-      console.log(`Запускаем проверку VK Donut для пользователя ${context.senderId}...`);
+      console.log(`🔍 Этап 1: Проверка VK Donut для пользователя ${context.senderId}...`);
       const hasPayment = await utils.checkVkDonutPayment(context.senderId);
-      console.log('isDon для', context.senderId, '=>', hasPayment);
+      console.log(`✅ Этап 1 завершен: isDon для ${context.senderId} => ${hasPayment}`);
       
       // Проверяем принудительно одобренных пользователей
+      console.log(`🔍 Этап 2: Проверка принудительно одобренных пользователей...`);
       const isForceApproved = context.senderId === 493635171 || utils.checkForceApproved(context.senderId);
+      console.log(`✅ Этап 2 завершен: isForceApproved для ${context.senderId} => ${isForceApproved}`);
       
       // Проверяем, есть ли пользователь в списке восстановленных пользователей
+      console.log(`🔍 Этап 3: Проверка восстановленных пользователей...`);
       const restoredUsers = await db.getRestoredDonors();
       const isUserInRestoredList = restoredUsers.some(user => user.vk_id === Number(context.senderId));
+      console.log(`✅ Этап 3 завершен: isUserInRestoredList для ${context.senderId} => ${isUserInRestoredList}`);
       
       // Проверяем, одобрен ли пользователь в pending_users
+      console.log(`🔍 Этап 4: Проверка pending_users...`);
       const isPendingApproved = await db.isPendingApproved(context.senderId);
+      console.log(`✅ Этап 4 завершен: isPendingApproved для ${context.senderId} => ${isPendingApproved}`);
       
       // Если пользователь является активным пользователем или принудительно одобрен
       if (hasPayment === true || isForceApproved || isUserInRestoredList || isPendingApproved === true) {
         console.log(`✅ Пользователь ${context.senderId} подтвержден как пользователь`);
         
         // Проверяем, был ли уже выдан ключ
+        console.log(`🔍 Этап 5: Проверка существующего ключа...`);
         const existingKey = await db.getUserKey(context.senderId);
         
         if (existingKey) {
@@ -266,17 +273,25 @@ vk.updates.on('message_new', async (context) => {
         console.log(`Пользователь ${context.senderId} не найден в VK Donut. Добавлен в список ожидающих проверки.`);
       }
     } catch (error) {
-      console.error('Ошибка при обработке платежа:', error);
+      console.error('❌ Ошибка при обработке платежа для пользователя', context.senderId, ':', error);
       console.error('Stack trace:', error.stack);
+      
+      // Добавляем более детальную информацию об ошибке
+      console.error('Детали ошибки:');
+      console.error('- Тип ошибки:', error.constructor.name);
+      console.error('- Сообщение:', error.message);
+      console.error('- Код ошибки:', error.code);
       
       // Определяем тип ошибки для лучшей информации пользователю
       let errorMessage = 'Произошла ошибка при обработке платежа. Пожалуйста, попробуйте позже.';
       
       // Можно добавить более точные сообщения в зависимости от типа ошибки
-      if (error.message.includes('database') || error.message.includes('DB')) {
+      if (error.message.includes('database') || error.message.includes('DB') || error.message.includes('sqlite')) {
         errorMessage = 'Ошибка при работе с базой данных. Пожалуйста, попробуйте позже.';
       } else if (error.message.includes('VK API') || error.message.includes('network')) {
         errorMessage = 'Ошибка при обращении к VK. Пожалуйста, попробуйте позже.';
+      } else if (error.message.includes('no such function') || error.message.includes('function')) {
+        errorMessage = 'Ошибка в функции приложения. Администратор уведомлен.';
       }
       
       await sendWithKeyboard(context, errorMessage);

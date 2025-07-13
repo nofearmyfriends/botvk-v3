@@ -370,29 +370,62 @@ async function savePayment(vkId, accessKey) {
   nextPayment.setDate(nextPayment.getDate() + 30); // +30 дней
 
   return new Promise((resolve, reject) => {
-    db.run(
-      `INSERT INTO users (vk_id, access_key, payment_date, next_payment, is_active, key_used)
-       VALUES (?, ?, ?, ?, 1, 0)
-       ON CONFLICT(vk_id) DO UPDATE SET
-         access_key   = excluded.access_key,
-         payment_date = excluded.payment_date,
-         next_payment = excluded.next_payment,
-         is_active    = 1,
-         key_used     = 0`,
-      [vkId, accessKey, paymentDate.toISOString(), nextPayment.toISOString()],
-      function(err) {
-        if (err) {
-          reject(err);
-        } else {
-          resolve({
-            vkId,
-            accessKey,
-            paymentDate,
-            nextPayment
-          });
-        }
+    // Сначала проверяем, есть ли уже пользователь с таким vk_id
+    db.get('SELECT * FROM users WHERE vk_id = ?', [vkId], (err, existingUser) => {
+      if (err) {
+        reject(err);
+        return;
       }
-    );
+      
+      if (existingUser) {
+        // Обновляем существующую запись
+        db.run(
+          `UPDATE users SET 
+             access_key = ?, 
+             payment_date = ?, 
+             next_payment = ?, 
+             is_active = 1, 
+             key_used = 0 
+           WHERE vk_id = ?`,
+          [accessKey, paymentDate.toISOString(), nextPayment.toISOString(), vkId],
+          function(err) {
+            if (err) {
+              reject(err);
+            } else {
+              resolve({
+                vkId,
+                accessKey,
+                paymentDate,
+                nextPayment,
+                isActive: 1,
+                keyUsed: 0
+              });
+            }
+          }
+        );
+      } else {
+        // Создаем новую запись
+        db.run(
+          `INSERT INTO users (vk_id, access_key, payment_date, next_payment, is_active, key_used)
+           VALUES (?, ?, ?, ?, 1, 0)`,
+          [vkId, accessKey, paymentDate.toISOString(), nextPayment.toISOString()],
+          function(err) {
+            if (err) {
+              reject(err);
+            } else {
+              resolve({
+                vkId,
+                accessKey,
+                paymentDate,
+                nextPayment,
+                isActive: 1,
+                keyUsed: 0
+              });
+            }
+          }
+        );
+      }
+    });
   });
 }
 
@@ -2251,8 +2284,13 @@ function createBackup() {
                     return;
                   }
                   
-                  // Создаем таблицу в бэкапе
-                  backupDb.run(createStmts[0].sql, function(err) {
+                  // Создаем таблицу в бэкапе (добавляем IF NOT EXISTS для предотвращения ошибки)
+                  let createSql = createStmts[0].sql;
+                  if (createSql.includes('CREATE TABLE')) {
+                    createSql = createSql.replace('CREATE TABLE', 'CREATE TABLE IF NOT EXISTS');
+                  }
+                  
+                  backupDb.run(createSql, function(err) {
                     if (err) {
                       rejectTable(err);
                       return;
