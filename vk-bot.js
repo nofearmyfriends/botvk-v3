@@ -52,11 +52,45 @@ const processedMessages = new Map(); // messageId -> timestamp
 // НОВАЯ СИСТЕМА: Дедупликация по тексту сообщения и пользователю
 const processedTextMessages = new Map(); // "userId_messageText_timestamp" -> timestamp
 
+// СПЕЦИАЛЬНАЯ ЗАЩИТА для команды "оплатил" - более строгая дедупликация
+const paymentProcessingLock = new Map(); // userId -> timestamp последней обработки "оплатил"
+
 // Функция для создания уникального ключа сообщения по тексту
 function createTextMessageKey(userId, messageText, timestamp) {
-  // Округляем timestamp до секунд, чтобы сообщения в одну секунду считались дубликатами
+  // Для команды "оплатил" используем более строгую дедупликацию (миллисекунды)
+  if (messageText === 'оплатил' || messageText === 'оплатила') {
+    // Округляем до 500 миллисекунд для очень строгой дедупликации
+    const roundedTimestamp = Math.floor(timestamp / 500) * 500;
+    return `${userId}_${messageText.toLowerCase().trim()}_${roundedTimestamp}`;
+  }
+  
+  // Для других сообщений округляем до секунд
   const roundedTimestamp = Math.floor(timestamp / 1000);
   return `${userId}_${messageText.toLowerCase().trim()}_${roundedTimestamp}`;
+}
+
+// Функция проверки блокировки команды "оплатил"
+function isPaymentCommandBlocked(userId, messageText) {
+  if (messageText !== 'оплатил' && messageText !== 'оплатила') {
+    return false;
+  }
+  
+  const now = Date.now();
+  const lastProcessed = paymentProcessingLock.get(userId);
+  const PAYMENT_COOLDOWN = 30000; // 30 секунд между командами "оплатил"
+  
+  if (lastProcessed && (now - lastProcessed) < PAYMENT_COOLDOWN) {
+    return true;
+  }
+  
+  return false;
+}
+
+// Функция установки блокировки команды "оплатил"
+function setPaymentCommandLock(userId, messageText) {
+  if (messageText === 'оплатил' || messageText === 'оплатила') {
+    paymentProcessingLock.set(userId, Date.now());
+  }
 }
 
 // Функция очистки старых записей из processingUsers
@@ -106,12 +140,25 @@ function cleanupProcessedTextMessages() {
   }
 }
 
+// Функция очистки старых блокировок команд "оплатил"
+function cleanupPaymentLocks() {
+  const now = Date.now();
+  const CLEANUP_TIME = 60000; // Удаляем блокировки старше 1 минуты
+  
+  for (const [userId, timestamp] of paymentProcessingLock.entries()) {
+    if (now - timestamp > CLEANUP_TIME) {
+      paymentProcessingLock.delete(userId);
+    }
+  }
+}
+
 // Периодическая очистка каждые 30 секунд (увеличена частота)
 setInterval(() => {
   cleanupProcessingUsers();
   cleanupActiveProcessing();
   cleanupProcessedMessages();
   cleanupProcessedTextMessages();
+  cleanupPaymentLocks();
 }, 30000); // 30 секунд
 
 // Выводим переменные окружения для отладки
@@ -147,6 +194,15 @@ vk.updates.on('message_new', async (context) => {
   const messageText = context.text ? context.text.toLowerCase().trim() : '';
   const userId = context.senderId;
   
+  // СПЕЦИАЛЬНАЯ ЗАЩИТА для команды "оплатил" - проверяем блокировку ДО всех остальных проверок
+  if (isPaymentCommandBlocked(userId, messageText)) {
+    const lastProcessed = paymentProcessingLock.get(userId);
+    const timeLeft = Math.ceil((30000 - (now - lastProcessed)) / 1000);
+    console.log(`🚫 БЛОКИРОВКА КОМАНДЫ "ОПЛАТИЛ": Пользователь ${userId} заблокирован на ${timeLeft} сек`);
+    await context.send(`⏳ Команда "оплатил" заблокирована. Подождите ${timeLeft} секунд.`);
+    return;
+  }
+  
   // ЗАЩИТА ОТ ДУБЛИРОВАНИЯ СООБЩЕНИЙ VK API
   const messageId = context.id;
   const conversationMessageId = context.conversationMessageId;
@@ -171,9 +227,12 @@ vk.updates.on('message_new', async (context) => {
   processedMessages.set(messageKey, now);
   processedTextMessages.set(textMessageKey, now);
   
+  // Для команды "оплатил" устанавливаем дополнительную блокировку
+  setPaymentCommandLock(userId, messageText);
+  
   console.log(`📝 Новое сообщение от ${userId}: "${messageText}"`);
   console.log(`📝 Ключи: ID=${messageKey}, ТЕКСТ=${textMessageKey}`);
-  console.log(`📊 Размеры: processedMessages=${processedMessages.size}, processedTextMessages=${processedTextMessages.size}`);
+  console.log(`📊 Размеры: processedMessages=${processedMessages.size}, processedTextMessages=${processedTextMessages.size}, paymentLocks=${paymentProcessingLock.size}`);
 
   // Защита от спама/флуда
   
@@ -515,4 +574,4 @@ module.exports = {
   vk,
   isAdmin,
   startVkBot
-}; 
+};
