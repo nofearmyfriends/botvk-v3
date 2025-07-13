@@ -89,7 +89,6 @@ ${reasonStr}
 const db = require('./db');
 const tgBot = require('./tg-bot');
 const cron = require('./cron');
-const selfPing = require('./self-ping');
 const express = require('express');
 const bodyParser = require('body-parser');
 const app = express();
@@ -145,10 +144,6 @@ async function startApp() {
     // Запуск еженедельной очистки сообщений
     console.log('🧹 Настройка еженедельной очистки сообщений...');
     cron.scheduleWeeklyCleanup();
-    
-    // Запуск системы самопинга для предотвращения засыпания
-    console.log('🔄 Запуск системы самопинга...');
-    selfPing.startSelfPing();
     
     // Создание директории для логов, если её нет
     const fs = require('fs');
@@ -263,84 +258,7 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`🌐 Express server запущен на порту ${PORT} (CodeSandbox)`);
   console.log(`📍 VK Callback API URL: https://your-sandbox-id.csb.app/`);
-  
-  // Запускаем упрощенный keep-alive для CodeSandbox
-  startKeepAlive();
 });
 
 // Запуск приложения
-startApp();
-
-// --------------------------------------------------------------
-// Упрощенный Keep-alive для CodeSandbox
-// --------------------------------------------------------------
-function startKeepAlive() {
-  console.log('🔄 Keep-alive: запуск системы поддержания активности для CodeSandbox');
-  
-  const fs = require('fs');
-  const path = require('path');
-  
-  // Интервал активности (каждые 4 минуты)
-  const interval = Number(process.env.KEEP_ALIVE_INTERVAL_MS) || 240000;
-  
-  // Статистика для мониторинга
-  const stats = {
-    totalActivities: 0,
-    fileActivities: 0,
-    httpRequests: 0
-  };
-  
-  // Основная функция поддержания активности
-  const keepAlive = () => {
-    try {
-      // 1. Обновляем файл активности
-      const tmpDir = path.join(__dirname, 'tmp');
-      if (!fs.existsSync(tmpDir)) {
-        fs.mkdirSync(tmpDir, { recursive: true });
-      }
-      
-      const keepAliveFile = path.join(tmpDir, 'keep-alive.txt');
-      const timestamp = new Date().toISOString();
-      fs.writeFileSync(keepAliveFile, `Keep-alive: ${timestamp}\nHosting: CodeSandbox\n`);
-      
-      stats.fileActivities++;
-      stats.totalActivities++;
-      
-      console.log(`🔄 Keep-alive активность: ${timestamp}`);
-      
-      // 2. Обновляем статус в мониторинге
-      try {
-        const utils = require('./utils');
-        if (utils && utils.monitoring) {
-          utils.monitoring.updateServiceStatus('keepAlive', true);
-        }
-      } catch (error) {
-        console.log(`ℹ️ Keep-alive: ошибка обновления мониторинга: ${error.message}`);
-      }
-      
-    } catch (error) {
-      console.log(`ℹ️ Keep-alive: ошибка (игнорируется): ${error.message}`);
-    }
-  };
-  
-  // Запускаем активность каждые 4 минуты
-  setInterval(keepAlive, interval);
-  
-  // Сразу запускаем первую активность
-  setTimeout(keepAlive, 2000);
-  
-  // Статистика каждые 30 минут
-  setInterval(() => {
-    console.log(`📊 [Keep-alive статистика] Всего активностей: ${stats.totalActivities}, файловых: ${stats.fileActivities}`);
-  }, 1800000);
-  
-  // Инициализируем статус в мониторинге
-  try {
-    const utils = require('./utils');
-    if (utils && utils.monitoring) {
-      utils.monitoring.updateServiceStatus('keepAlive', true);
-    }
-  } catch (error) {
-    console.log(`ℹ️ Keep-alive: ошибка инициализации мониторинга: ${error.message}`);
-  }
-} 
+startApp(); 

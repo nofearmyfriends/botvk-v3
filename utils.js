@@ -335,8 +335,7 @@ const monitoring = {
   serviceStatus: {
     vkApi: { status: 'unknown', lastCheck: 0, errors: 0 },
     telegramApi: { status: 'unknown', lastCheck: 0, errors: 0 },
-    database: { status: 'unknown', lastCheck: 0, errors: 0 },
-    keepAlive: { status: 'unknown', lastCheck: 0, errors: 0 }
+    database: { status: 'unknown', lastCheck: 0, errors: 0 }
   },
   
   /**
